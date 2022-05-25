@@ -13,11 +13,11 @@ It is a well-known phenomena that AV/EDR products or software with similar inten
 
 An example of a vital Windows API that most AV/EDR products monitor is the `NtCreateThreadEx` function.
 
-![NtCreateThreadEx1](/assets/img/2022-05-24-windows-usermode-hooks-1/NtCreateThreadEx_1.png)
+![NtCreateThreadEx1](/assets/img/2022-05-25-windows-usermode-hooks-1/NtCreateThreadEx_1.png)
 
 As can be seen in the illustration above, the function is a wrapper for a syscall into the kernel. This particular function is responsible for spawning a new thread in the context of a process, and is often used by malicious actors to execute buffers containing shellcode. An example of the same API when hooked by an AV/EDR product (in this case, SentinelOne) can be seen below.
 
-![NtCreateThreadEx2](/assets/img/2022-05-24-windows-usermode-hooks-1/NtCreateThreadEx_2.png)
+![NtCreateThreadEx2](/assets/img/2022-05-25-windows-usermode-hooks-1/NtCreateThreadEx_2.png)
 
 Notice how the first instructions in the function has been replaced with a relative `jmp` instruction that redirects the execution flow into a function located in the `InProcessClient64.dll` library. Here, the SentinelOne library can analyse the parameters of the function in an attempt to evaluate whether the function is being used for malicious purposes. If the library evaluates that the usage is legitimate, they will continue execution of the `NtCreateThreadEx` function. However, if the library evaluates that the usage is malicious, the process will terminate and a security incident event will be raised.
 
@@ -114,19 +114,19 @@ LoadLibrary
 
 The `LdrpLoadKnownDll` function is responsible for loading KnownDLL libraries, which includes `kernel32.dll` and `kernelbase.dll`. The functionality of the `LdrpLoadKnownDll` function can be seen below.
 
-![LdrpLoadKnownDll](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpLoadKnownDll.png)
+![LdrpLoadKnownDll](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpLoadKnownDll.png)
 
 The `LdrpLoadKnownDll` function appears to obtain a section handle to a KnownDLL library by invoking `LdrpFindKnownDll`, and then maps the library into memory by passing the section handle to `LdrpMapDllWithSectionHandle`. Let us take a look at how this section handle is obtained in the `LdrpFindKnownDll` function.
 
-![LdrpFindKnownDll](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpFindKnownDll.png)
+![LdrpFindKnownDll](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpFindKnownDll.png)
 
 The `LdrpFindKnownDll` function obtains a section handle to a target KnownDLL library by invoking the `NtOpenSection` API with an `OBJECT_ATTRIBUTES` object whose `RootDirectory` attribute is set using an internal `LdrpKnownDllDirectoryHandle` object. Let us take a look at how this section handle is used to map the library into memory in the `LdrpMapDllWithSectionHandle` function.
 
-![LdrpMapDllWithSectionHandle](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpMapDllWithSectionHandle.png)
+![LdrpMapDllWithSectionHandle](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpMapDllWithSectionHandle.png)
 
 The `LdrpMapDllWithSectionHandle` function invokes `LdrpMinimalMapModule` to map the library into memory, and then performs a subsequent series of actions to prepare the module for execution, such as populating the Import Address Table (IAT). Let us take a look at how the `LdrpMinimalMapModule` function works internally.
 
-![LdrpMinimalMapModule](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpMinimalMapModule.png)
+![LdrpMinimalMapModule](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpMinimalMapModule.png)
 
 The `LdrpMinimalMapModule` function map the library into memory by invoking the `NtMapViewOfSection` API with the section handle previously obtained from the `NtOpenSection` API call in the `LdrpFindKnownDll` function. 
 
@@ -134,15 +134,15 @@ We should be able to map our own KnownDLL library into memory by obtaining a sec
 
 In the 64-bit version of `ntdll.dll`, an exported function called `LdrGetKnownDllSectionHandle` does exactly what we are looking for. However, this function does not exist in the 32-bit version of `ntdll.dll` (or atleast the SYSWOW64 version), so we will have to create our own function. Let us take a look at how the `LdrGetKnownDllSectionHandle` object is constructed.
 
-![LdrpInitializeProcess1](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpInitializeProcess_1.png)
+![LdrpInitializeProcess1](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpInitializeProcess_1.png)
 
 The `LdrpInitializeProcess` function constructs the `LdrGetKnownDllSectionHandle` object by invoking the `NtOpenDirectoryObject` API with an `OBJECT_ATTRIBUTES` object whose `ObjectName` attribute is set to a `UNICODE_STRING` object that contains the string `"\KnownDlls"` as shown below.
 
-![LdrpInitializeProcess2](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpInitializeProcess_2.png)
+![LdrpInitializeProcess2](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpInitializeProcess_2.png)
 
 If we check the same functionality in the SYSWOW64 version of `ntdll.dll`, we observe the same thing, except the `UNICODE_STRING` object contains the string `"\KnownDlls32"` instead.
 
-![LdrpInitializeProcess3](/assets/img/2022-05-24-windows-usermode-hooks-1/LdrpInitializeProcess_3.png)
+![LdrpInitializeProcess3](/assets/img/2022-05-25-windows-usermode-hooks-1/LdrpInitializeProcess_3.png)
 
 If we puzzle all of our findings together, we find that we can construct our own `LdrGetKnownDllSectionHandle` function as shown below.
 
